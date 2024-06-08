@@ -137,9 +137,8 @@ class HTTP11Connection(ConnectionInterface):
                 },
             )
         except BaseException as exc:
-            with ShieldCancellation():
-                with Trace("response_closed", logger, request) as trace:
-                    self._response_closed()
+            with Trace("response_closed", logger, request) as trace:
+                ShieldCancellation.shield(self._response_closed)
             raise exc
 
     # Sending the request...
@@ -344,8 +343,7 @@ class HTTP11ConnectionByteStream:
             # If we get an exception while streaming the response,
             # we want to close the response (and possibly the connection)
             # before raising that exception.
-            with ShieldCancellation():
-                self.close()
+            ShieldCancellation.shield(self.close)
             raise exc
 
     def close(self) -> None:

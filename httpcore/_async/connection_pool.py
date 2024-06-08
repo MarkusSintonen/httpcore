@@ -299,10 +299,15 @@ class AsyncConnectionPool(AsyncRequestInterface):
         return closing_connections
 
     async def _close_connections(self, closing: List[AsyncConnectionInterface]) -> None:
+        if not closing:
+            return
+
         # Close connections which have been removed from the pool.
-        with AsyncShieldCancellation():
+        async def close() -> None:
             for connection in closing:
                 await connection.aclose()
+
+        await AsyncShieldCancellation.shield(close)
 
     async def aclose(self) -> None:
         # Explicitly close the connection pool.
@@ -369,9 +374,9 @@ class PoolByteStream:
     async def aclose(self) -> None:
         if not self._closed:
             self._closed = True
-            with AsyncShieldCancellation():
-                if hasattr(self._stream, "aclose"):
-                    await self._stream.aclose()
+
+            if hasattr(self._stream, "aclose"):
+                await AsyncShieldCancellation.shield(self._stream.aclose)
 
             with self._pool._optional_thread_lock:
                 self._pool._requests.remove(self._pool_request)
