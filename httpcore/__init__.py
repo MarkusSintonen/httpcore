@@ -15,6 +15,7 @@ from ._backends.base import (
     NetworkBackend,
     NetworkStream,
 )
+from ._backends.asyncio import AsyncioBackend
 from ._backends.mock import AsyncMockBackend, AsyncMockStream, MockBackend, MockStream
 from ._backends.sync import SyncBackend
 from ._exceptions import (
@@ -97,6 +98,7 @@ __all__ = [
     "SOCKSProxy",
     # network backends, implementations
     "SyncBackend",
+    "AsyncioBackend",
     "AnyIOBackend",
     "TrioBackend",
     # network backends, mock implementations

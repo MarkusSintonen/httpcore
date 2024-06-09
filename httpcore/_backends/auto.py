@@ -8,15 +8,20 @@ from .base import SOCKET_OPTION, AsyncNetworkBackend, AsyncNetworkStream
 class AutoBackend(AsyncNetworkBackend):
     async def _init_backend(self) -> None:
         if not (hasattr(self, "_backend")):
-            backend = current_async_library()
-            if backend == "trio":
+            async_lib = current_async_library()
+            if async_lib == "trio":
                 from .trio import TrioBackend
 
                 self._backend: AsyncNetworkBackend = TrioBackend()
-            else:
+            # Note: AsyncioBackend has better performance characteristics than AnyioBackend
+            elif async_lib == "anyio":
                 from .anyio import AnyIOBackend
 
                 self._backend = AnyIOBackend()
+            else:
+                from .asyncio import AsyncioBackend
+
+                self._backend = AsyncioBackend()
 
     async def connect_tcp(
         self,
