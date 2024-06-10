@@ -4,7 +4,7 @@ from typing import Generator, List
 
 import pytest
 
-from httpcore import AnyIOBackend, TrioBackend
+from httpcore import AnyIOBackend, AsyncioBackend, TrioBackend
 from httpcore._backends.auto import AutoBackend
 from httpcore._synchronization import AsyncLibrary, current_async_library
 
@@ -39,4 +39,4 @@ async def test_current_async_library(anyio_backend, check_tested_async_libraries
         else:
             assert os.environ["HTTPCORE_PREFER_ANYIO"] == "0"
             assert current == "asyncio"
-            assert isinstance(auto_backend._backend, AnyIOBackend)
+            assert isinstance(auto_backend._backend, AsyncioBackend)
