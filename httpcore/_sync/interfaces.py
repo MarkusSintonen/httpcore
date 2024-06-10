@@ -110,7 +110,7 @@ class ConnectionInterface(RequestInterface):
         """
         raise NotImplementedError()  # pragma: nocover
 
-    def has_expired(self) -> bool:
+    def has_expired(self, socket_poll_interval_secs: float) -> bool:
         """
         Return `True` if the connection is in a state where it should be closed.
 

@@ -25,7 +25,7 @@ def test_http11_connection():
         assert conn.is_idle()
         assert not conn.is_closed()
         assert conn.is_available()
-        assert not conn.has_expired()
+        assert not conn.has_expired(socket_poll_interval_secs=-1)
         assert (
             repr(conn)
             == "<HTTP11Connection ['https://example.com:443', IDLE, Request Count: 1]>"
@@ -55,7 +55,7 @@ def test_http11_connection_unread_response():
         assert not conn.is_idle()
         assert conn.is_closed()
         assert not conn.is_available()
-        assert not conn.has_expired()
+        assert not conn.has_expired(socket_poll_interval_secs=-1)
         assert (
             repr(conn)
             == "<HTTP11Connection ['https://example.com:443', CLOSED, Request Count: 1]>"
@@ -77,7 +77,7 @@ def test_http11_connection_with_remote_protocol_error():
         assert not conn.is_idle()
         assert conn.is_closed()
         assert not conn.is_available()
-        assert not conn.has_expired()
+        assert not conn.has_expired(socket_poll_interval_secs=-1)
         assert (
             repr(conn)
             == "<HTTP11Connection ['https://example.com:443', CLOSED, Request Count: 1]>"
@@ -106,7 +106,7 @@ def test_http11_connection_with_incomplete_response():
         assert not conn.is_idle()
         assert conn.is_closed()
         assert not conn.is_available()
-        assert not conn.has_expired()
+        assert not conn.has_expired(socket_poll_interval_secs=-1)
         assert (
             repr(conn)
             == "<HTTP11Connection ['https://example.com:443', CLOSED, Request Count: 1]>"
@@ -138,7 +138,7 @@ def test_http11_connection_with_local_protocol_error():
         assert not conn.is_idle()
         assert conn.is_closed()
         assert not conn.is_available()
-        assert not conn.has_expired()
+        assert not conn.has_expired(socket_poll_interval_secs=-1)
         assert (
             repr(conn)
             == "<HTTP11Connection ['https://example.com:443', CLOSED, Request Count: 1]>"

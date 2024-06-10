@@ -218,8 +218,8 @@ class ForwardHTTPConnection(ConnectionInterface):
     def is_available(self) -> bool:
         return self._connection.is_available()
 
-    def has_expired(self) -> bool:
-        return self._connection.has_expired()
+    def has_expired(self, socket_poll_interval_secs: float) -> bool:
+        return self._connection.has_expired(socket_poll_interval_secs)
 
     def is_idle(self) -> bool:
         return self._connection.is_idle()
@@ -355,8 +355,8 @@ class TunnelHTTPConnection(ConnectionInterface):
     def is_available(self) -> bool:
         return self._connection.is_available()
 
-    def has_expired(self) -> bool:
-        return self._connection.has_expired()
+    def has_expired(self, socket_poll_interval_secs: float) -> bool:
+        return self._connection.has_expired(socket_poll_interval_secs)
 
     def is_idle(self) -> bool:
         return self._connection.is_idle()

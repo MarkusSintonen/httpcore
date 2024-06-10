@@ -38,7 +38,7 @@ def test_http_connection():
         assert not conn.is_idle()
         assert not conn.is_closed()
         assert not conn.is_available()
-        assert not conn.has_expired()
+        assert not conn.has_expired(socket_poll_interval_secs=-1)
         assert repr(conn) == "<HTTPConnection [CONNECTING]>"
 
         with conn.stream("GET", "https://example.com/") as response:
@@ -54,7 +54,7 @@ def test_http_connection():
         assert conn.is_idle()
         assert not conn.is_closed()
         assert conn.is_available()
-        assert not conn.has_expired()
+        assert not conn.has_expired(socket_poll_interval_secs=-1)
         assert (
             repr(conn)
             == "<HTTPConnection ['https://example.com:443', HTTP/1.1, IDLE, Request Count: 1]>"

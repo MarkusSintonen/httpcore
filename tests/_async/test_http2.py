@@ -36,7 +36,7 @@ async def test_http2_connection():
         assert conn.is_idle()
         assert conn.is_available()
         assert not conn.is_closed()
-        assert not conn.has_expired()
+        assert not conn.has_expired(socket_poll_interval_secs=-1)
         assert (
             conn.info() == "'https://example.com:443', HTTP/2, IDLE, Request Count: 1"
         )

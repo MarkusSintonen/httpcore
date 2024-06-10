@@ -1,3 +1,4 @@
+import random
 import ssl
 import sys
 from types import TracebackType
@@ -238,6 +239,7 @@ class AsyncConnectionPool(AsyncRequestInterface):
         those connections to be handled seperately.
         """
         closing_connections = []
+        idling_connections = {c for c in self._connections if c.is_idle()}
 
         # First we handle cleaning up any connections that are closed,
         # have expired their keep-alive, or surplus idle connections.
@@ -245,18 +247,20 @@ class AsyncConnectionPool(AsyncRequestInterface):
             if connection.is_closed():
                 # log: "removing closed connection"
                 self._connections.remove(connection)
-            elif connection.has_expired():
+                idling_connections.discard(connection)
+            elif self._has_connection_expired(connection):
                 # log: "closing expired connection"
                 self._connections.remove(connection)
+                idling_connections.discard(connection)
                 closing_connections.append(connection)
             elif (
                 connection.is_idle()
-                and len([connection.is_idle() for connection in self._connections])
-                > self._max_keepalive_connections
+                and len(idling_connections) > self._max_keepalive_connections
             ):
                 # log: "closing idle connection"
                 self._connections.remove(connection)
                 closing_connections.append(connection)
+                idling_connections.discard(connection)
 
         # Assign queued requests to connections.
         queued_requests = [request for request in self._requests if request.is_queued()]
@@ -266,9 +270,6 @@ class AsyncConnectionPool(AsyncRequestInterface):
                 connection
                 for connection in self._connections
                 if connection.can_handle_request(origin) and connection.is_available()
-            ]
-            idle_connections = [
-                connection for connection in self._connections if connection.is_idle()
             ]
 
             # There are three cases for how we may be able to handle the request:
@@ -286,17 +287,25 @@ class AsyncConnectionPool(AsyncRequestInterface):
                 connection = self.create_connection(origin)
                 self._connections.append(connection)
                 pool_request.assign_to_connection(connection)
-            elif idle_connections:
-                # log: "closing idle connection"
-                connection = idle_connections[0]
-                self._connections.remove(connection)
-                closing_connections.append(connection)
-                # log: "creating new connection"
-                connection = self.create_connection(origin)
-                self._connections.append(connection)
-                pool_request.assign_to_connection(connection)
+            else:
+                idling_connection = next(
+                    (c for c in self._connections if c.is_idle()), None
+                )
+                if idling_connection is not None:
+                    # log: "closing idle connection"
+                    self._connections.remove(idling_connection)
+                    closing_connections.append(idling_connection)
+                    # log: "creating new connection"
+                    new_connection = self.create_connection(origin)
+                    self._connections.append(new_connection)
+                    pool_request.assign_to_connection(new_connection)
 
         return closing_connections
+
+    def _has_connection_expired(self, connection: AsyncConnectionInterface) -> bool:
+        # Randomize to avoid polling for all the connections at once
+        poll_interval_secs_smudged = random.uniform(1, 3)
+        return connection.has_expired(poll_interval_secs_smudged)
 
     async def _close_connections(self, closing: List[AsyncConnectionInterface]) -> None:
         if not closing:
