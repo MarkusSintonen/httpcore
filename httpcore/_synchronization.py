@@ -1,10 +1,22 @@
+import asyncio
+import os
 import threading
 from types import TracebackType
-from typing import Optional, Type
+from typing import (
+    Any,
+    Callable,
+    Coroutine,
+    Literal,
+    Optional,
+    Protocol,
+    Type,
+    TypeVar,
+    cast,
+)
 
 from ._exceptions import ExceptionMapping, PoolTimeout, map_exceptions
 
-# Our async synchronization primatives use either 'anyio' or 'trio' depending
+# Our async synchronization primitives use either 'asyncio' or 'trio' depending
 # on if they're running under asyncio or trio.
 
 try:
@@ -18,23 +30,22 @@ except ImportError:  # pragma: nocover
     anyio = None  # type: ignore
 
 
-def current_async_library() -> str:
+AsyncBackend = Literal["asyncio", "trio"]
+AsyncLibrary = Literal["asyncio", "trio", "anyio"]
+
+
+def current_async_backend() -> AsyncBackend:
     # Determine if we're running under trio or asyncio.
     # See https://sniffio.readthedocs.io/en/latest/
     try:
         import sniffio
     except ImportError:  # pragma: nocover
-        environment = "asyncio"
+        environment: AsyncBackend = "asyncio"
     else:
-        environment = sniffio.current_async_library()
+        environment = cast(AsyncBackend, sniffio.current_async_library())
 
     if environment not in ("asyncio", "trio"):  # pragma: nocover
         raise RuntimeError("Running under an unsupported async environment.")
-
-    if environment == "asyncio" and anyio is None:  # pragma: nocover
-        raise RuntimeError(
-            "Running with asyncio requires installation of 'httpcore[asyncio]'."
-        )
 
     if environment == "trio" and trio is None:  # pragma: nocover
         raise RuntimeError(
@@ -42,6 +53,28 @@ def current_async_library() -> str:
         )
 
     return environment
+
+
+def current_async_library() -> AsyncLibrary:
+    if current_async_backend() == "trio":
+        return "trio"
+
+    if anyio is not None:
+        anyio_env = os.environ.get("HTTPCORE_PREFER_ANYIO", "true").lower()
+        if anyio_env in ("true", "1"):
+            return "anyio"
+
+    return "asyncio"
+
+
+class _LockProto(Protocol):
+    async def acquire(self) -> Any: ...
+    def release(self) -> None: ...
+
+
+class _EventProto(Protocol):
+    def set(self) -> None: ...
+    async def wait(self) -> Any: ...
 
 
 class AsyncLock:
@@ -53,28 +86,26 @@ class AsyncLock:
     """
 
     def __init__(self) -> None:
-        self._backend = ""
+        self._lock: Optional[_LockProto] = None
 
-    def setup(self) -> None:
+    def setup(self) -> _LockProto:
         """
         Detect if we're running under 'asyncio' or 'trio' and create
         a lock with the correct implementation.
         """
-        self._backend = current_async_library()
-        if self._backend == "trio":
-            self._trio_lock = trio.Lock()
-        elif self._backend == "asyncio":
-            self._anyio_lock = anyio.Lock()
+        if current_async_backend() == "trio":
+            lock: _LockProto = trio.Lock()
+        else:
+            # Note: asyncio.Lock has better performance characteristics than anyio.Lock
+            # https://github.com/encode/httpx/issues/3215
+            lock = asyncio.Lock()
+        self._lock = lock
+        return lock
 
     async def __aenter__(self) -> "AsyncLock":
-        if not self._backend:
-            self.setup()
-
-        if self._backend == "trio":
-            await self._trio_lock.acquire()
-        elif self._backend == "asyncio":
-            await self._anyio_lock.acquire()
-
+        if (lock := self._lock) is None:
+            lock = self.setup()
+        await lock.acquire()
         return self
 
     async def __aexit__(
@@ -83,10 +114,7 @@ class AsyncLock:
         exc_value: Optional[BaseException] = None,
         traceback: Optional[TracebackType] = None,
     ) -> None:
-        if self._backend == "trio":
-            self._trio_lock.release()
-        elif self._backend == "asyncio":
-            self._anyio_lock.release()
+        cast(_LockProto, self._lock).release()
 
 
 class AsyncThreadLock:
@@ -112,78 +140,74 @@ class AsyncThreadLock:
 class AsyncEvent:
     def __init__(self) -> None:
         self._backend = ""
+        self._event: Optional[_EventProto] = None
 
-    def setup(self) -> None:
+    def setup(self) -> _EventProto:
         """
         Detect if we're running under 'asyncio' or 'trio' and create
         a lock with the correct implementation.
         """
-        self._backend = current_async_library()
+        self._backend = current_async_backend()
         if self._backend == "trio":
-            self._trio_event = trio.Event()
-        elif self._backend == "asyncio":
-            self._anyio_event = anyio.Event()
+            event: _EventProto = trio.Event()
+        else:
+            # Note: asyncio.Event has better performance characteristics than anyio.Event
+            event = asyncio.Event()
+        self._event = event
+        return event
 
     def set(self) -> None:
-        if not self._backend:
-            self.setup()
-
-        if self._backend == "trio":
-            self._trio_event.set()
-        elif self._backend == "asyncio":
-            self._anyio_event.set()
+        if (event := self._event) is None:
+            event = self.setup()
+        event.set()
 
     async def wait(self, timeout: Optional[float] = None) -> None:
-        if not self._backend:
-            self.setup()
+        if (event := self._event) is None:
+            event = self.setup()
 
         if self._backend == "trio":
             trio_exc_map: ExceptionMapping = {trio.TooSlowError: PoolTimeout}
             timeout_or_inf = float("inf") if timeout is None else timeout
             with map_exceptions(trio_exc_map):
                 with trio.fail_after(timeout_or_inf):
-                    await self._trio_event.wait()
-        elif self._backend == "asyncio":
-            anyio_exc_map: ExceptionMapping = {TimeoutError: PoolTimeout}
-            with map_exceptions(anyio_exc_map):
-                with anyio.fail_after(timeout):
-                    await self._anyio_event.wait()
+                    await event.wait()
+        else:
+            asyncio_exc_map: ExceptionMapping = {TimeoutError: PoolTimeout}
+            with map_exceptions(asyncio_exc_map):
+                async with asyncio.timeout(timeout):
+                    await event.wait()
 
 
 class AsyncSemaphore:
     def __init__(self, bound: int) -> None:
         self._bound = bound
-        self._backend = ""
+        self._semaphore: Optional[_LockProto] = None
 
-    def setup(self) -> None:
+    def setup(self) -> _LockProto:
         """
         Detect if we're running under 'asyncio' or 'trio' and create
         a semaphore with the correct implementation.
         """
-        self._backend = current_async_library()
-        if self._backend == "trio":
-            self._trio_semaphore = trio.Semaphore(
+        if current_async_backend() == "trio":
+            semaphore: _LockProto = trio.Semaphore(
                 initial_value=self._bound, max_value=self._bound
             )
-        elif self._backend == "asyncio":
-            self._anyio_semaphore = anyio.Semaphore(
-                initial_value=self._bound, max_value=self._bound
-            )
+        else:
+            # Note: asyncio.BoundedSemaphore has better performance characteristics than anyio.Semaphore
+            semaphore = asyncio.BoundedSemaphore(self._bound)
+        self._semaphore = semaphore
+        return semaphore
 
     async def acquire(self) -> None:
-        if not self._backend:
-            self.setup()
-
-        if self._backend == "trio":
-            await self._trio_semaphore.acquire()
-        elif self._backend == "asyncio":
-            await self._anyio_semaphore.acquire()
+        if (semaphore := self._semaphore) is None:
+            semaphore = self.setup()
+        await semaphore.acquire()
 
     async def release(self) -> None:
-        if self._backend == "trio":
-            self._trio_semaphore.release()
-        elif self._backend == "asyncio":
-            self._anyio_semaphore.release()
+        cast(_LockProto, self._semaphore).release()
+
+
+T = TypeVar("T")
 
 
 class AsyncShieldCancellation:
@@ -191,38 +215,30 @@ class AsyncShieldCancellation:
     # closing connections during exception handling we want to shield
     # the operation from being cancelled.
     #
-    # with AsyncShieldCancellation():
-    #     ... # clean-up operations, shielded from cancellation.
+    # async def cleanup():
+    #     ...
+    #
+    # # clean-up operations, shielded from cancellation.
+    # await AsyncShieldCancellation.shield(cleanup)
 
-    def __init__(self) -> None:
-        """
-        Detect if we're running under 'asyncio' or 'trio' and create
-        a shielded scope with the correct implementation.
-        """
-        self._backend = current_async_library()
+    @staticmethod
+    async def shield(shielded: Callable[[], Coroutine[Any, Any, None]]) -> None:
+        if current_async_backend() == "trio":
+            with trio.CancelScope(shield=True):
+                await shielded()
+        else:
+            await AsyncShieldCancellation._asyncio_shield(shielded)
 
-        if self._backend == "trio":
-            self._trio_shield = trio.CancelScope(shield=True)
-        elif self._backend == "asyncio":
-            self._anyio_shield = anyio.CancelScope(shield=True)
-
-    def __enter__(self) -> "AsyncShieldCancellation":
-        if self._backend == "trio":
-            self._trio_shield.__enter__()
-        elif self._backend == "asyncio":
-            self._anyio_shield.__enter__()
-        return self
-
-    def __exit__(
-        self,
-        exc_type: Optional[Type[BaseException]] = None,
-        exc_value: Optional[BaseException] = None,
-        traceback: Optional[TracebackType] = None,
+    @staticmethod
+    async def _asyncio_shield(
+        shielded: Callable[[], Coroutine[Any, Any, None]],
     ) -> None:
-        if self._backend == "trio":
-            self._trio_shield.__exit__(exc_type, exc_value, traceback)
-        elif self._backend == "asyncio":
-            self._anyio_shield.__exit__(exc_type, exc_value, traceback)
+        inner_task = asyncio.create_task(shielded())
+        try:
+            await asyncio.shield(inner_task)
+        except asyncio.CancelledError:
+            # Let the inner_task to complete as it was shielded from the cancellation
+            await inner_task
 
 
 # Our thread-based synchronization primitives...
@@ -305,13 +321,6 @@ class ShieldCancellation:
     # Thread-synchronous codebases don't support cancellation semantics.
     # We have this class because we need to mirror the async and sync
     # cases within our package, but it's just a no-op.
-    def __enter__(self) -> "ShieldCancellation":
-        return self
-
-    def __exit__(
-        self,
-        exc_type: Optional[Type[BaseException]] = None,
-        exc_value: Optional[BaseException] = None,
-        traceback: Optional[TracebackType] = None,
-    ) -> None:
-        pass
+    @staticmethod
+    def shield(fn: Callable[[], None]) -> None:
+        fn()

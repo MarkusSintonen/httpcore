@@ -137,9 +137,8 @@ class AsyncHTTP11Connection(AsyncConnectionInterface):
                 },
             )
         except BaseException as exc:
-            with AsyncShieldCancellation():
-                async with Trace("response_closed", logger, request) as trace:
-                    await self._response_closed()
+            async with Trace("response_closed", logger, request) as trace:
+                await AsyncShieldCancellation.shield(self._response_closed)
             raise exc
 
     # Sending the request...
@@ -344,8 +343,7 @@ class HTTP11ConnectionByteStream:
             # If we get an exception while streaming the response,
             # we want to close the response (and possibly the connection)
             # before raising that exception.
-            with AsyncShieldCancellation():
-                await self.aclose()
+            await AsyncShieldCancellation.shield(self.aclose)
             raise exc
 
     async def aclose(self) -> None:
