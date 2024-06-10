@@ -68,6 +68,7 @@ class AsyncHTTP11Connection(AsyncConnectionInterface):
             our_role=h11.CLIENT,
             max_incomplete_event_size=self.MAX_INCOMPLETE_EVENT_SIZE,
         )
+        self._prev_socket_use_time = time.monotonic()
 
     async def handle_async_request(self, request: Request) -> Response:
         if not self.can_handle_request(request.url.origin):
@@ -172,6 +173,7 @@ class AsyncHTTP11Connection(AsyncConnectionInterface):
         bytes_to_send = self._h11_state.send(event)
         if bytes_to_send is not None:
             await self._network_stream.write(bytes_to_send, timeout=timeout)
+            self._prev_socket_use_time = time.monotonic()
 
     # Receiving the response...
 
@@ -223,6 +225,7 @@ class AsyncHTTP11Connection(AsyncConnectionInterface):
                 data = await self._network_stream.read(
                     self.READ_NUM_BYTES, timeout=timeout
                 )
+                self._prev_socket_use_time = time.monotonic()
 
                 # If we feed this case through h11 we'll raise an exception like:
                 #
@@ -277,17 +280,22 @@ class AsyncHTTP11Connection(AsyncConnectionInterface):
         # acquired from the connection pool for any other request.
         return self._state == HTTPConnectionState.IDLE
 
-    def has_expired(self) -> bool:
+    def has_expired(self, socket_poll_interval_secs: float) -> bool:
         now = time.monotonic()
         keepalive_expired = self._expire_at is not None and now > self._expire_at
 
         # If the HTTP connection is idle but the socket is readable, then the
         # only valid state is that the socket is about to return b"", indicating
         # a server-initiated disconnect.
-        server_disconnected = (
-            self._state == HTTPConnectionState.IDLE
-            and self._network_stream.get_extra_info("is_readable")
-        )
+        # Checking the readable status is relatively expensive so check it at a lower frequency.
+        if (now - self._prev_socket_use_time) > socket_poll_interval_secs:
+            self._prev_socket_use_time = now
+            server_disconnected = (
+                self._state == HTTPConnectionState.IDLE
+                and self._network_stream.get_extra_info("is_readable")
+            )
+        else:
+            server_disconnected = False
 
         return keepalive_expired or server_disconnected
 

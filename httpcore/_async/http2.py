@@ -518,7 +518,7 @@ class AsyncHTTP2Connection(AsyncConnectionInterface):
             )
         )
 
-    def has_expired(self) -> bool:
+    def has_expired(self, socket_poll_interval_secs: float) -> bool:
         now = time.monotonic()
         return self._expire_at is not None and now > self._expire_at
 

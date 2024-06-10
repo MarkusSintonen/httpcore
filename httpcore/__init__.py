@@ -8,6 +8,7 @@ from ._async import (
     AsyncHTTPProxy,
     AsyncSOCKSProxy,
 )
+from ._backends.asyncio import AsyncioBackend
 from ._backends.base import (
     SOCKET_OPTION,
     AsyncNetworkBackend,
@@ -15,7 +16,6 @@ from ._backends.base import (
     NetworkBackend,
     NetworkStream,
 )
-from ._backends.asyncio import AsyncioBackend
 from ._backends.mock import AsyncMockBackend, AsyncMockStream, MockBackend, MockStream
 from ._backends.sync import SyncBackend
 from ._exceptions import (

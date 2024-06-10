@@ -166,35 +166,23 @@ class ByteStream:
 
 class Origin:
     def __init__(self, scheme: bytes, host: bytes, port: int) -> None:
-        self._scheme = scheme
-        self._host = host
-        self._port = port
-        self._str = Origin.as_str(self)
-
-    @property
-    def scheme(self) -> bytes:
-        return self._scheme
-
-    @property
-    def host(self) -> bytes:
-        return self._host
-
-    @property
-    def port(self) -> int:
-        return self._port
-
-    @staticmethod
-    def as_str(origin: "Origin") -> str:
-        scheme = origin.scheme.decode("ascii")
-        host = origin.host.decode("ascii")
-        port = str(origin.port)
-        return f"{scheme}://{host}:{port}"
+        self.scheme = scheme
+        self.host = host
+        self.port = port
 
     def __eq__(self, other: Any) -> bool:
-        return isinstance(other, Origin) and self._str == other._str
+        return (
+            isinstance(other, Origin)
+            and self.scheme == other.scheme
+            and self.host == other.host
+            and self.port == other.port
+        )
 
     def __str__(self) -> str:
-        return self._str
+        scheme = self.scheme.decode("ascii")
+        host = self.host.decode("ascii")
+        port = str(self.port)
+        return f"{scheme}://{host}:{port}"
 
 
 class URL:

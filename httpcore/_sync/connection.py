@@ -182,10 +182,10 @@ class HTTPConnection(ConnectionInterface):
             )
         return self._connection.is_available()
 
-    def has_expired(self) -> bool:
+    def has_expired(self, socket_poll_interval_secs: float) -> bool:
         if self._connection is None:
             return self._connect_failed
-        return self._connection.has_expired()
+        return self._connection.has_expired(socket_poll_interval_secs)
 
     def is_idle(self) -> bool:
         if self._connection is None:
